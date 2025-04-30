@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Typing Game</title>
+  <style>
+    :root {
+      --bg: #111;
+      --text: #eee;
+      --accent: #f9a826;
+      --correct: #4caf50;
+      --incorrect: #f44336;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Courier New', monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    header {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 1rem;
+    }
+
+    button {
+      background: none;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+
+    button:hover:not([disabled]) {
+      background-color: var(--accent);
+      color: var(--bg);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #timer {
+      font-size: 2rem;
+      margin-bottom: 1rem;
+      color: var(--accent);
+    }
+
+    #paragraph {
+      font-size: 1.5rem;
+      max-width: 700px;
+      text-align: center;
+      line-height: 2.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .word {
+      margin-right: 0.5rem;
+    }
+
+    .letter {
+      display: inline-block;
+    }
+
+    .letter.correct {
+      color: var(--correct);
+    }
+
+    .letter.incorrect {
+      color: var(--incorrect);
+    }
+
+    .letter.active {
+      border-bottom: 2px solid var(--accent);
+    }
+
+    #hidden-input {
+      opacity: 0;
+      position: absolute;
+      pointer-events: none;
+    }
+
+    #stats {
+      display: none;
+      font-size: 1.25rem;
+      text-align: center;
+    }
+
+    #stats div {
+      margin: 0.5rem 0;
+    }
+  </style>
+</head>
+
+<body>
+
+  <header>
+    <button data-time="15">15s</button>
+    <button data-time="30">30s</button>
+    <button data-time="60">60s</button>
+    <button id="toggle-precision">🎯 Modo Precisión(5 Errores): ON</button>
+    <button id="restart">🔄 Reiniciar</button>
+  </header>
+
+  <div id="timer" data-start-time="30">30</div>
+
+  <div id="paragraph"></div>
+  <input id="hidden-input" type="text" />
+
+  <div id="stats">
+    <div>WPM actual: <span id="wpm">0</span></div>
+    <div>WPM anterior: <span id="wpm-prev">0</span></div>
+    <div>Precisión: <span id="accuracy">0%</span></div>
+    <div>Errores: <span id="errors">0</span></div>
+  </div>
+
+  <script src="data.js"></script>
+  <script>
+    const $paragraph = document.getElementById('paragraph');
+    const $input = document.getElementById('hidden-input');
+    const $timer = document.getElementById('timer');
+    const $stats = document.getElementById('stats');
+    const $wpm = document.getElementById('wpm');
+    const $wpmPrev = document.getElementById('wpm-prev');
+    const $accuracy = document.getElementById('accuracy');
+    const $errors = document.getElementById('errors');
+    const $buttons = document.querySelectorAll('button[data-time]');
+    const $restart = document.getElementById('restart');
+    const $precisionToggle = document.getElementById('toggle-precision');
+
+    let words = [];
+    let timeLeft = 30;
+    let timerId;
+    let started = false;
+    let precisionMode = true;
+    let correct = 0;
+    let errors = 0;
+    let blocked = false;
+    let previousWPM = 0;
+
+    function initGame(time = 30) {
+      clearInterval(timerId);
+      started = false;
+      timeLeft = time;
+      blocked = false;
+      correct = 0;
+      errors = 0;
+      $stats.style.display = 'none';
+      $paragraph.innerHTML = '';
+      $input.value = '';
+      $timer.textContent = timeLeft;
+      $timer.setAttribute('data-start-time', time);
+      enableButtons(true);
+      generateText();
+      focusInput();
+    }
+
+    function generateText() {
+      words = WORDS.sort(() => Math.random() - 0.5).slice(0, 50);
+      $paragraph.innerHTML = words.map(word =>
+        `<span class="word">${[...word].map(l => `<span class="letter">${l}</span>`).join('')}</span>`
+      ).join(' ');
+
+      $paragraph.querySelector('.letter').classList.add('active');
+    }
+
+    document.addEventListener('keydown', e => {
+      focusInput();
+
+      if (blocked) return;
+
+      if (!started && e.key.length === 1) {
+        started = true;
+        enableButtons(false);
+        timerId = setInterval(updateTimer, 1000);
+      }
+
+      const current = $paragraph.querySelector('.letter.active');
+      if (!current) return;
+
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+        if (e.key === current.textContent) {
+          current.classList.add('correct');
+          correct++;
+        } else {
+          current.classList.add('incorrect');
+          errors++;
+          if (precisionMode && errors >= 5) {
+            blocked = true;
+            clearInterval(timerId);
+            endGame();
+            return;
+          }
+        }
+
+        current.classList.remove('active');
+        const next = getNext(current);
+        if (next) next.classList.add('active');
+      }
+
+      if (e.key === ' ') {
+        e.preventDefault();
+        moveToNextWord();
+      }
+    });
+
+    function getNext(el) {
+      return el.nextElementSibling || el.parentElement.nextElementSibling?.querySelector('.letter');
+    }
+
+    function moveToNextWord() {
+      const active = $paragraph.querySelector('.letter.active');
+      if (active) {
+        active.classList.remove('active');
+        const nextWord = active.closest('.word').nextElementSibling;
+        if (nextWord) nextWord.querySelector('.letter').classList.add('active');
+      }
+    }
+
+    function updateTimer() {
+      timeLeft--;
+      $timer.textContent = timeLeft;
+      if (timeLeft <= 0) {
+        clearInterval(timerId);
+        endGame();
+      }
+    }
+
+    function endGame() {
+      const total = correct + errors;
+      const acc = total > 0 ? (correct / total) * 100 : 0;
+        const startTime = parseInt($timer.getAttribute('data-start-time')) || 30;
+        const wpmNow = (correct / 5) * (60 / startTime);
+
+        $wpm.textContent = Math.round(wpmNow);
+        $accuracy.textContent = `${acc.toFixed(1)}%`;
+        $errors.textContent = errors;
+        $wpmPrev.textContent = previousWPM;
+        previousWPM = Math.round(wpmNow);
+
+      $stats.style.display = 'block';
+    }
+
+    function focusInput() {
+      $input.focus();
+    }
+
+    function enableButtons(enable) {
+      $buttons.forEach(btn => btn.disabled = !enable);
+    }
+
+    $buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        initGame(parseInt(btn.dataset.time));
+      });
+    });
+
+    $restart.addEventListener('click', () => {
+      const time = parseInt($timer.getAttribute('data-start-time')) || 30;
+      initGame(time);
+    });
+
+    $precisionToggle.addEventListener('click', () => {
+      precisionMode = !precisionMode;
+      $precisionToggle.textContent = `🎯 Modo Precisión (5 Errores): ${precisionMode ? 'ON' : 'OFF'}`;
+    });
+
+    initGame();
+  </script>
+
+</body>
+
+</html>
